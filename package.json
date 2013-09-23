@@ -18,8 +18,7 @@
   "dependencies": {
 	"http-proxy": "0.10.3",
     "ncom": "0.9.1",
-	"simplesocketproxy": "0.9.0",
-	
+	"simplesocketproxy": "0.9.0"
   },
   "main": "index",
   "engines": {
