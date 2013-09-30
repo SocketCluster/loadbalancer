@@ -13,7 +13,7 @@ var LoadBalancer = function (options) {
 	this._errorDomain.on('error', function (err) {
 		self.emit('error', err);
 	});
-
+	
 	this.protocol = options.protocol || 'http';
 	this.protocolOptions = options.protocolOptions;
 	this.sourcePort = options.sourcePort;
@@ -101,6 +101,7 @@ LoadBalancer.prototype._watchWorkerStatuses = function () {
 		(function (worker) {
 			port = worker.port;
 			socket = new ComSocket();
+			self._errorDomain.add(socket);
 			socket.connect(worker.statusPort, 'localhost');
 			
 			var authMessage = {
@@ -116,6 +117,7 @@ LoadBalancer.prototype._watchWorkerStatuses = function () {
 			});
 
 			socket.on('close', function () {
+				self._errorDomain.remove(socket);
 				self.workerStatuses[port] = null;
 			});
 			
