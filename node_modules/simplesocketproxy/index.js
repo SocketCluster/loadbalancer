@@ -4,8 +4,20 @@ var EventEmitter = require('events').EventEmitter;
 var Receiver = require('./receiver').Receiver;
 var domain = require('domain');
 
-var SimpleSocketProxy = function () {
+var SimpleSocketProxy = function (options) {
 	var self = this;
+	
+	if (!options) {
+		options = {};
+	}
+	
+	this.protocol = options.protocol || 'http';
+	
+	if (this.protocol == 'https') {
+		this._proto = https;
+	} else {
+		this._proto = http;
+	}
 	
 	this._errorDomain = domain.create();
 	this._errorDomain.on('error', function (err) {
@@ -53,12 +65,6 @@ SimpleSocketProxy.prototype.proxy = function (req, sourceSocket, dest) {
 	target.headers = req.headers;
 	
 	var protocol = this._getProto(req);
-	var proto;
-	if (protocol == 'https') {
-		proto = https;
-	} else {
-		proto = http;
-	}
 	
 	if (target.headers['x-forwarded-for']) {
 		var addressToAppend = "," + req.connection.remoteAddress || req.socket.remoteAddress;
@@ -79,7 +85,7 @@ SimpleSocketProxy.prototype.proxy = function (req, sourceSocket, dest) {
 		target.headers['x-forwarded-proto'] = protocol;
 	}
 
-	var targetRequest = proto.request(target);
+	var targetRequest = this._proto.request(target);
 	targetRequest.end();
 	
 	targetRequest.on('upgrade', function (targetResponse, targetSocket, targetHead) {

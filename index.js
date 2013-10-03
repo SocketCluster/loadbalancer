@@ -14,7 +14,6 @@ var LoadBalancer = function (options) {
 		self.emit('error', err);
 	});
 	
-	this.protocol = options.protocol || 'http';
 	this.protocolOptions = options.protocolOptions;
 	this.sourcePort = options.sourcePort;
 	this.hostAddress = options.hostAddress;
@@ -57,7 +56,7 @@ var LoadBalancer = function (options) {
 		} else {
 			dest = {
 				host: 'localhost',
-				port: self.leastBusyPort,
+				port: self.leastBusyPort
 			};
 		}
 		socketProxy.proxy(req, socket, dest);
@@ -66,11 +65,17 @@ var LoadBalancer = function (options) {
 	this.workerStatuses = {};
 	this.leastBusyPort = this._randomPort();
 	
-	this._server = httpProxy.createServer(proxyHTTP);
-	this._server.on('upgrade', proxyWebSocket);
+	if (this.protocolOptions) {
+		var proxyOptions = {
+			https: this.protocolOptions
+		};
+		this._server = httpProxy.createServer(proxyHTTP, proxyOptions);
+	} else {
+		this._server = httpProxy.createServer(proxyHTTP);
+	}
 	
 	this._errorDomain.add(this._server);
-	
+	this._server.on('upgrade', proxyWebSocket);
 	this._server.listen(this.sourcePort);
 };
 
