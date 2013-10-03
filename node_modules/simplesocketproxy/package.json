@@ -1,6 +1,6 @@
 {
   "name": "simplesocketproxy",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "A simple websocket proxy",
   "keywords": [
     "websocket",
