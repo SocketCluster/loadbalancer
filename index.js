@@ -1,7 +1,6 @@
 var http = require('http');
 var httpProxy = require('http-proxy');
 var url = require('url');
-var ComSocket = require('ncom').ComSocket;
 var SimpleSocketProxy = require('simplesocketproxy').SimpleSocketProxy;
 var domain = require('domain');
 var EventEmitter = require('events').EventEmitter;
@@ -19,7 +18,9 @@ var LoadBalancer = function (options) {
 	this.hostAddress = options.hostAddress;
 	
 	this.dataKey = options.dataKey;
-	this.checkWorkersInterval = 5000;
+	this.statusCheckInterval = options.statusCheckInterval || 5000;
+	this.checkStatusTimeout = options.checkStatusTimeout || 10000;
+	this.statusURL = options.statusURL || '/~status';
 
 	this._destRegex = /^([^_]*)_([^_]*)_([^_]*)_/;
 	this._sidRegex = /([^A-Za-z0-9]|^)s?sid=([^;]*)/;
@@ -88,49 +89,9 @@ LoadBalancer.prototype.setWorkers = function (workers) {
 	for (i in workers) {
 		this.destPorts[workers[i].port] = 1;
 	}
-	for (i in this.workers) {
-		if (this.destPorts[this.workers[i].port] == null && this.workers[i].socket) {
-			this.workers[i].socket.end();
-		}
-	}
 	this.workers = workers;
 	
-	this._watchWorkerStatuses();
-};
-
-LoadBalancer.prototype._watchWorkerStatuses = function () {
-	var self = this;
-	var socket, port;
-	
-	for (i in this.workers) {
-		(function (worker) {
-			port = worker.port;
-			socket = new ComSocket();
-			self._errorDomain.add(socket);
-			socket.connect(worker.statusPort, 'localhost');
-			
-			var authMessage = {
-				type: 'auth',
-				data: self.dataKey
-			};
-			
-			var msg = JSON.stringify(authMessage);
-			socket.write(msg);
-			socket.on('message', function (message) {
-				var data = JSON.parse(message);
-				self.workerStatuses[port] = data;
-			});
-
-			socket.on('close', function () {
-				self._errorDomain.remove(socket);
-				self.workerStatuses[port] = null;
-			});
-			
-			worker.socket = socket;
-		})(self.workers[i]);
-	}
-	
-	setInterval(this._updateStatus.bind(this), this.checkWorkersInterval);
+	setInterval(this._errorDomain.bind(this._updateStatus.bind(this)), this.statusCheckInterval);
 };
 
 LoadBalancer.prototype._randomPort = function () {
@@ -138,7 +99,7 @@ LoadBalancer.prototype._randomPort = function () {
 	return this.workers[rand].port;
 };
 
-LoadBalancer.prototype._updateStatus = function () {
+LoadBalancer.prototype.calculateLeastBusyPort = function () {
 	var minBusiness = Infinity;
 	var leastBusyPort;
 	var httpRPM, ioRPM, clientCount, business;
@@ -167,7 +128,66 @@ LoadBalancer.prototype._updateStatus = function () {
 	this.leastBusyPort = leastBusyPort;
 };
 
-LoadBalancer.prototype._parseDest = function (req) {	
+LoadBalancer.prototype._updateStatus = function () {
+	var self = this;
+	var statusesRead = 0;
+	var workerCount = this.workers.length;
+	
+	var body = {
+		dataKey: self.dataKey
+	};
+	
+	for (var i in this.workers) {
+		(function (worker) {
+			var options = {
+				hostname: 'localhost',
+				port: worker.port,
+				method: 'POST',
+				path: self.statusURL
+			};
+			
+			var req = http.request(options, function (res) {
+				res.setEncoding('utf8');
+				var buffers = [];
+				
+				res.on('data', function (chunk) {
+					buffers.push(chunk);
+				});
+				
+				res.on('end', function () {
+					var result = Buffer.concat(buffers).toString();
+					if (result) {
+						try {
+							self.workerStatuses[worker.port] = JSON.parse(result);
+						} catch (err) {
+							self.workerStatuses[worker.port] = null;
+						}
+						console.log(11, process.pid, result);
+						
+					} else {
+						self.workerStatuses[worker.port] = null;
+					}
+					
+					if (++statusesRead >= workerCount) {
+						self.calculateLeastBusyPort.call(self);
+					}
+				});
+			});
+			
+			req.on('socket', function (socket) {
+				socket.setTimeout(self.checkStatusTimeout);
+				socket.on('timeout', function () {
+					req.abort();
+				})
+			});
+			
+			req.write(JSON.stringify(body));
+			req.end();
+		})(this.workers[i]);
+	}
+};
+
+LoadBalancer.prototype._parseDest = function (req) {
 	if (!req.headers || !req.headers.host) {
 		return null;
 	}
