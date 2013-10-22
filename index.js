@@ -161,9 +161,7 @@ LoadBalancer.prototype._updateStatus = function () {
 							self.workerStatuses[worker.port] = JSON.parse(result);
 						} catch (err) {
 							self.workerStatuses[worker.port] = null;
-						}
-						console.log(11, process.pid, result);
-						
+						}						
 					} else {
 						self.workerStatuses[worker.port] = null;
 					}
