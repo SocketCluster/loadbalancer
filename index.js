@@ -10,7 +10,11 @@ var LoadBalancer = function (options) {
 	
 	this._errorDomain = domain.create();
 	this._errorDomain.on('error', function (err) {
-		self.emit('error', err);
+		if (err.message && err.message == 'socket hang up') {
+			self.emit('notice', err);
+		} else {
+			self.emit('error', err);
+		}
 	});
 	
 	this.protocolOptions = options.protocolOptions;
