@@ -32,40 +32,12 @@ var LoadBalancer = function (options) {
 	
 	this.setWorkers(options.workers);
 
-	var proxyHTTP = this._errorDomain.bind(function (req, res, proxy) {
-		var dest = self._parseDest(req);
-		if (dest) {
-			if (self.destPorts[dest.port] == null) {
-				dest.port = self._randomPort();
-			}
-		} else {
-			dest = {
-				host: 'localhost',
-				port: self.leastBusyPort
-			};
-		}
-		
-		proxy.proxyRequest(req, res, dest);
-	});
+	var proxyHTTP = this._errorDomain.bind(this._proxyHTTP.bind(this));
 	
-	var socketProxy = new SimpleSocketProxy();
-	this._errorDomain.add(socketProxy);
+	this._socketProxy = new SimpleSocketProxy();
+	this._errorDomain.add(this._socketProxy);
 
-	var proxyWebSocket = this._errorDomain.bind(function (req, socket, head) {
-		var dest = self._parseDest(req);
-		
-		if (dest) {
-			if (self.destPorts[dest.port] == null) {
-				dest.port = self._randomPort();
-			}
-		} else {
-			dest = {
-				host: 'localhost',
-				port: self.leastBusyPort
-			};
-		}
-		socketProxy.proxy(req, socket, dest);
-	});
+	var proxyWebSocket = this._errorDomain.bind(this._proxyWebSocket.bind(this));
 	
 	this.workerStatuses = {};
 	this.leastBusyPort = this._randomPort();
@@ -85,6 +57,38 @@ var LoadBalancer = function (options) {
 };
 
 LoadBalancer.prototype = Object.create(EventEmitter.prototype);
+
+LoadBalancer.prototype._proxyHTTP = function (req, res, proxy) {
+	var dest = this._parseDest(req);
+	if (dest) {
+		if (this.destPorts[dest.port] == null) {
+			dest.port = this._randomPort();
+		}
+	} else {
+		dest = {
+			host: 'localhost',
+			port: this.leastBusyPort
+		};
+	}
+	
+	proxy.proxyRequest(req, res, dest);
+};
+
+LoadBalancer.prototype._proxyWebSocket = function (req, socket, head) {
+	var dest = this._parseDest(req);
+	
+	if (dest) {
+		if (this.destPorts[dest.port] == null) {
+			dest.port = this._randomPort();
+		}
+	} else {
+		dest = {
+			host: 'localhost',
+			port: this.leastBusyPort
+		};
+	}
+	this._socketProxy.proxy(req, socket, dest);
+};
 
 LoadBalancer.prototype.setWorkers = function (workers) {
 	this.destPorts = {};
