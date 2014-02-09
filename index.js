@@ -1,7 +1,7 @@
 var http = require('http');
+var https = require('https');
 var httpProxy = require('http-proxy');
 var url = require('url');
-var SimpleSocketProxy = require('simplesocketproxy').SimpleSocketProxy;
 var domain = require('domain');
 var EventEmitter = require('events').EventEmitter;
 
@@ -10,12 +10,14 @@ var LoadBalancer = function (options) {
 	
 	this._errorDomain = domain.create();
 	this._errorDomain.on('error', function (err) {
-		if (!err.message || err.message != 'socket hang up') {
+		if (!err.message || (err.message != 'read ECONNRESET' && err.message != 'socket hang up')) {
 			self.emit('error', err);
 		}
 	});
 	
+	this.protocol = options.protocol;
 	this.protocolOptions = options.protocolOptions;
+	
 	this.sourcePort = options.sourcePort;
 	this.hostAddress = options.hostAddress;
 	
@@ -31,32 +33,41 @@ var LoadBalancer = function (options) {
 	this.setWorkers(options.workers);
 
 	var proxyHTTP = this._errorDomain.bind(this._proxyHTTP.bind(this));
-	
-	this._socketProxy = new SimpleSocketProxy();
-	this._errorDomain.add(this._socketProxy);
-
 	var proxyWebSocket = this._errorDomain.bind(this._proxyWebSocket.bind(this));
 	
 	this.workerStatuses = {};
 	this.leastBusyPort = this._randomPort();
+
+	this._proxy = httpProxy.createProxyServer({
+		xfwd: true,
+		ws: true
+	});
 	
-	if (this.protocolOptions) {
-		var proxyOptions = {
-			https: this.protocolOptions
-		};
-		this._server = httpProxy.createServer(proxyHTTP, proxyOptions);
+	this._proxy.on('error', function (err, req, res) {
+		if (res.writeHead) {
+			res.writeHead(500, {
+				'Content-Type': 'text/html'
+			});
+		}
+		
+		res.end('Proxy error - ' + (err.message || err));
+	});
+	
+	if (this.protocol == 'https') {
+		this._server = https.createServer(this.protocolOptions, proxyHTTP);
 	} else {
-		this._server = httpProxy.createServer(proxyHTTP);
+		this._server = http.createServer(proxyHTTP);
 	}
 	
 	this._errorDomain.add(this._server);
+	
 	this._server.on('upgrade', proxyWebSocket);
 	this._server.listen(this.sourcePort);
 };
 
 LoadBalancer.prototype = Object.create(EventEmitter.prototype);
 
-LoadBalancer.prototype._proxyHTTP = function (req, res, proxy) {
+LoadBalancer.prototype._proxyHTTP = function (req, res) {
 	var dest = this._parseDest(req);
 	if (dest) {
 		if (this.destPorts[dest.port] == null) {
@@ -69,7 +80,9 @@ LoadBalancer.prototype._proxyHTTP = function (req, res, proxy) {
 		};
 	}
 	
-	proxy.proxyRequest(req, res, dest);
+	this._proxy.web(req, res, {
+		target: dest
+	});
 };
 
 LoadBalancer.prototype._proxyWebSocket = function (req, socket, head) {
@@ -85,7 +98,10 @@ LoadBalancer.prototype._proxyWebSocket = function (req, socket, head) {
 			port: this.leastBusyPort
 		};
 	}
-	this._socketProxy.proxy(req, socket, dest);
+
+	this._proxy.ws(req, socket, head, {
+		target: dest
+	});
 };
 
 LoadBalancer.prototype.setWorkers = function (workers) {
@@ -241,7 +257,7 @@ LoadBalancer.prototype._parseDest = function (req) {
 			host = 'localhost';
 		}
 	}
-
+	
 	var dest = {
 		host: host,
 		port: parseInt(destMatch[2]) || this.leastBusyPort
