@@ -237,29 +237,8 @@ LoadBalancer.prototype._parseDest = function (req) {
 		return null;
 	}
 	
-	var host;
-	
-	if (this.host) {
-		if (this.host == destMatch[1] || !destMatch[1]) {
-			host = 'localhost';
-		} else {
-			host = destMatch[1];
-		}
-	} else {
-		var targetHostMatch = req.headers.host.match(this._hostRegex);
-		if (targetHostMatch) {
-			if (targetHostMatch[0] == destMatch[1] || !destMatch[1]) {
-				host = 'localhost';
-			} else {
-				host = destMatch[1];
-			}
-		} else {
-			host = 'localhost';
-		}
-	}
-	
 	var dest = {
-		host: host,
+		host: 'localhost',
 		port: parseInt(destMatch[2]) || this.leastBusyPort
 	};
 	
