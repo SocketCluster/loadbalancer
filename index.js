@@ -19,7 +19,7 @@ var LoadBalancer = function (options) {
 	this.protocolOptions = options.protocolOptions;
 	
 	this.sourcePort = options.sourcePort;
-	this.hostname = options.hostname;
+	this.host = options.host;
 	
 	this.dataKey = options.dataKey;
 	this.statusCheckInterval = options.statusCheckInterval || 5000;
@@ -239,8 +239,8 @@ LoadBalancer.prototype._parseDest = function (req) {
 	
 	var host;
 	
-	if (this.hostname) {
-		if (this.hostname == destMatch[1] || !destMatch[1]) {
+	if (this.host) {
+		if (this.host == destMatch[1] || !destMatch[1]) {
 			host = 'localhost';
 		} else {
 			host = destMatch[1];
