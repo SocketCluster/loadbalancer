@@ -4,6 +4,7 @@ var httpProxy = require('http-proxy');
 var url = require('url');
 var domain = require('domain');
 var EventEmitter = require('events').EventEmitter;
+var async = require('async');
 
 var LoadBalancer = function (options) {
 	var self = this;
@@ -14,6 +15,13 @@ var LoadBalancer = function (options) {
 			self.emit('error', err);
 		}
 	});
+	
+	this.MIDDLEWARE_REQUEST = 'request';
+	this.MIDDLEWARE_UPGRADE = 'upgrade';
+	
+	this._middleware = {};
+	this._middleware[this.MIDDLEWARE_REQUEST] = [];
+	this._middleware[this.MIDDLEWARE_UPGRADE] = [];
 	
 	this.protocol = options.protocol;
 	this.protocolOptions = options.protocolOptions;
@@ -32,8 +40,8 @@ var LoadBalancer = function (options) {
 	
 	this.setWorkers(options.workers);
 
-	var proxyHTTP = this._errorDomain.bind(this._proxyHTTP.bind(this));
-	var proxyWebSocket = this._errorDomain.bind(this._proxyWebSocket.bind(this));
+	this._proxyHTTP = this._errorDomain.bind(this._proxyHTTP.bind(this));
+	this._proxyWebSocket = this._errorDomain.bind(this._proxyWebSocket.bind(this));
 	
 	this.workerStatuses = {};
 	this.leastBusyPort = this._randomPort();
@@ -54,18 +62,50 @@ var LoadBalancer = function (options) {
 	});
 	
 	if (this.protocol == 'https') {
-		this._server = https.createServer(this.protocolOptions, proxyHTTP);
+		this._server = https.createServer(this.protocolOptions, this._handleRequest.bind(this));
 	} else {
-		this._server = http.createServer(proxyHTTP);
+		this._server = http.createServer(this._handleRequest.bind(this));
 	}
 	
 	this._errorDomain.add(this._server);
 	
-	this._server.on('upgrade', proxyWebSocket);
+	this._server.on('upgrade', this._handleUpgrade.bind(this));
+	
+	if (options.appBalancerControllerPath) {
+		this.balancerController = require(options.appBalancerControllerPath);
+		this.balancerController.run(this);
+	}
+	
 	this._server.listen(this.sourcePort);
 };
 
 LoadBalancer.prototype = Object.create(EventEmitter.prototype);
+
+LoadBalancer.prototype.addMiddleware = function (type, middleware) {
+	this._middleware[type].push(middleware);
+};
+
+LoadBalancer.prototype._handleRequest = function (req, res) {
+	var self = this;
+	async.applyEachSeries(this._middleware[this.MIDDLEWARE_REQUEST], req, res, function (err) {
+		if (err) {
+			self._errorDomain.emit('error', err);
+		} else {
+			self._proxyHTTP(req, res);
+		}
+	});
+};
+
+LoadBalancer.prototype._handleUpgrade = function (req, socket, head) {
+	var self = this;
+	async.applyEachSeries(this._middleware[this.MIDDLEWARE_UPGRADE], req, socket, head, function (err) {
+		if (err) {
+			self._errorDomain.emit('error', err);
+		} else {
+			self._proxyWebSocket(req, socket, head);
+		}
+	});
+};
 
 LoadBalancer.prototype._proxyHTTP = function (req, res) {
 	var dest = this._parseDest(req);
