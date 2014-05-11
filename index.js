@@ -36,7 +36,6 @@ var LoadBalancer = function (options) {
 
 	this._destRegex = /^([^_]*)_([^_]*)_([^_]*)_/;
 	this._sidRegex = /([^A-Za-z0-9]|^)s?sid=([^;]*)/;
-	this._hostRegex = /^[^:]*/;
 	
 	this.setWorkers(options.workers);
 
