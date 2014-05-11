@@ -33,6 +33,7 @@ var LoadBalancer = function (options) {
 	this.statusCheckInterval = options.statusCheckInterval || 5000;
 	this.checkStatusTimeout = options.checkStatusTimeout || 10000;
 	this.statusURL = options.statusURL || '/~status';
+	this.balancerCount = options.balancerCount || 1;
 
 	this._destRegex = /^([^_]*)_([^_]*)_([^_]*)_/;
 	this._sidRegex = /([^A-Za-z0-9]|^)s?sid=([^;]*)/;
@@ -43,7 +44,7 @@ var LoadBalancer = function (options) {
 	this._proxyWebSocket = this._errorDomain.bind(this._proxyWebSocket.bind(this));
 	
 	this.workerStatuses = {};
-	this.leastBusyPort = this._randomPort();
+	this.workerQuotas = [];
 
 	this._proxy = httpProxy.createProxyServer({
 		xfwd: true,
@@ -108,14 +109,15 @@ LoadBalancer.prototype._handleUpgrade = function (req, socket, head) {
 
 LoadBalancer.prototype._proxyHTTP = function (req, res) {
 	var dest = this._parseDest(req);
+	
 	if (dest) {
 		if (this.destPorts[dest.port] == null) {
-			dest.port = this._randomPort();
+			dest.port = this._chooseTargetPort();
 		}
 	} else {
 		dest = {
 			host: 'localhost',
-			port: this.leastBusyPort
+			port: this._chooseTargetPort()
 		};
 	}
 	
@@ -134,7 +136,7 @@ LoadBalancer.prototype._proxyWebSocket = function (req, socket, head) {
 	} else {
 		dest = {
 			host: 'localhost',
-			port: this.leastBusyPort
+			port: this._chooseTargetPort()
 		};
 	}
 
@@ -160,33 +162,57 @@ LoadBalancer.prototype._randomPort = function () {
 	return this.workers[rand].port;
 };
 
-LoadBalancer.prototype.calculateLeastBusyPort = function () {
-	var minBusiness = Infinity;
-	var leastBusyPort;
-	var httpRPM, ioRPM, clientCount, business;
+LoadBalancer.prototype._chooseTargetPort = function () {
+	if (this.workerQuotas.length) {
+		var leastBusyWorker = this.workerQuotas[this.workerQuotas.length - 1];
+		leastBusyWorker.quota--;
+		if (leastBusyWorker.quota < 1) {
+			this.workerQuotas.pop();
+		}
+		return leastBusyWorker.port;
+	}
+	return this._randomPort();
+};
+
+LoadBalancer.prototype._calculateWorkerQuotas = function () {
+	var totalBusiness = 0;
+	var sampleCount = 0;
+	var httpRPM, ioRPM, clientCount, business, averageBusiness;
+	var businessStatuses = {};
+	this.workerQuotas = [];
 	
 	for (var i in this.workerStatuses) {
 		if (this.workerStatuses[i]) {
 			clientCount = this.workerStatuses[i].clientCount;
 			httpRPM = this.workerStatuses[i].httpRPM;
 			ioRPM = this.workerStatuses[i].ioRPM;
+			business = httpRPM + ioRPM + clientCount;
+			totalBusiness += business;
+			sampleCount++;
 		} else {
 			clientCount = Infinity;
 			httpRPM = Infinity;
 			ioRPM = Infinity;
+			business = Infinity;
 		}
-		business = httpRPM + ioRPM + clientCount;
-		
-		if (business < minBusiness) {
-			minBusiness = business;
-			leastBusyPort = parseInt(i);
-		}
-	}
-	if (minBusiness == Infinity) {
-		leastBusyPort = this._randomPort();
+		businessStatuses[i] = business;
 	}
 	
-	this.leastBusyPort = leastBusyPort;
+	averageBusiness = totalBusiness / sampleCount;
+	
+	for (var j in businessStatuses) {
+		var targetQuota = Math.round((averageBusiness - businessStatuses[j]) / this.balancerCount);
+		if (targetQuota > 0) {
+			this.workerQuotas.push({
+				port: j,
+				quota: targetQuota
+			});
+		}
+	}
+	
+	this.workerQuotas.sort(function (a, b) {
+		return a.quota - b.quota;
+	});
 };
 
 LoadBalancer.prototype._updateStatus = function () {
@@ -228,7 +254,7 @@ LoadBalancer.prototype._updateStatus = function () {
 					}
 					
 					if (++statusesRead >= workerCount) {
-						self.calculateLeastBusyPort.call(self);
+						self._calculateWorkerQuotas.call(self);
 					}
 				});
 			});
@@ -276,9 +302,15 @@ LoadBalancer.prototype._parseDest = function (req) {
 		return null;
 	}
 	
+	var destPort = parseInt(destMatch[2]);
+	
+	if (!destPort) {
+		return null;
+	}
+	
 	var dest = {
 		host: 'localhost',
-		port: parseInt(destMatch[2]) || this.leastBusyPort
+		port: destPort
 	};
 	
 	return dest;
