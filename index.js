@@ -175,33 +175,26 @@ LoadBalancer.prototype._chooseTargetPort = function () {
 };
 
 LoadBalancer.prototype._calculateWorkerQuotas = function () {
-	var totalBusiness = 0;
-	var sampleCount = 0;
-	var httpRPM, ioRPM, clientCount, business, averageBusiness;
-	var businessStatuses = {};
+	var clientCount;
+	var maxClients = 0;
+	var workerClients = {};
 	this.workerQuotas = [];
 	
 	for (var i in this.workerStatuses) {
 		if (this.workerStatuses[i]) {
 			clientCount = this.workerStatuses[i].clientCount;
-			httpRPM = this.workerStatuses[i].httpRPM;
-			ioRPM = this.workerStatuses[i].ioRPM;
-			business = httpRPM + ioRPM + clientCount;
-			totalBusiness += business;
-			sampleCount++;
+			
+			if (clientCount > maxClients) {
+				maxClients = clientCount;
+			}
 		} else {
 			clientCount = Infinity;
-			httpRPM = Infinity;
-			ioRPM = Infinity;
-			business = Infinity;
 		}
-		businessStatuses[i] = business;
+		workerClients[i] = clientCount;
 	}
 	
-	averageBusiness = totalBusiness / sampleCount;
-	
-	for (var j in businessStatuses) {
-		var targetQuota = Math.round((averageBusiness - businessStatuses[j]) / this.balancerCount);
+	for (var j in workerClients) {
+		var targetQuota = Math.round((maxClients - workerClients[j]) / this.balancerCount);
 		if (targetQuota > 0) {
 			this.workerQuotas.push({
 				port: j,
