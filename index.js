@@ -34,6 +34,7 @@ var LoadBalancer = function (options) {
   this.checkStatusTimeout = options.checkStatusTimeout || 10000;
   this.statusURL = options.statusURL || '/~status';
   this.balancerCount = options.balancerCount || 1;
+  this.appBalancerControllerPath = options.appBalancerControllerPath;
 
   this._destRegex = /^([^_]*)_([^_]*)_([^_]*)_/;
   this._sidRegex = /([^A-Za-z0-9]|^)s?sid=([^;]*)/;
@@ -70,16 +71,22 @@ var LoadBalancer = function (options) {
   this._errorDomain.add(this._server);
 
   this._server.on('upgrade', this._handleUpgrade.bind(this));
+};
 
-  if (options.appBalancerControllerPath) {
-    this.balancerController = require(options.appBalancerControllerPath);
-    this.balancerController.run(this);
+LoadBalancer.prototype = Object.create(EventEmitter.prototype);
+
+LoadBalancer.prototype.start = function () {
+  var self = this;
+  
+  if (this.appBalancerControllerPath) {
+    this._errorDomain.run(function () {
+      self.balancerController = require(self.appBalancerControllerPath);
+      self.balancerController.run(self);
+    });
   }
 
   this._server.listen(this.sourcePort);
 };
-
-LoadBalancer.prototype = Object.create(EventEmitter.prototype);
 
 LoadBalancer.prototype.addMiddleware = function (type, middleware) {
   this._middleware[type].push(middleware);
