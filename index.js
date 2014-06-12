@@ -35,7 +35,8 @@ var LoadBalancer = function (options) {
   this.statusURL = options.statusURL || '/~status';
   this.balancerCount = options.balancerCount || 1;
   this.appBalancerControllerPath = options.appBalancerControllerPath;
-
+  this.useSmartBalancing = options.useSmartBalancing;
+  
   this._destRegex = /^([^_]*)_([^_]*)_([^_]*)_/;
   this._sidRegex = /([^A-Za-z0-9]|^)s?sid=([^;]*)/;
 
@@ -71,6 +72,10 @@ var LoadBalancer = function (options) {
   this._errorDomain.add(this._server);
 
   this._server.on('upgrade', this._handleUpgrade.bind(this));
+  
+  if (this.useSmartBalancing) {
+    setInterval(this._errorDomain.bind(this._updateStatus.bind(this)), this.statusCheckInterval);
+  }
 };
 
 LoadBalancer.prototype = Object.create(EventEmitter.prototype);
@@ -94,59 +99,77 @@ LoadBalancer.prototype.addMiddleware = function (type, middleware) {
 
 LoadBalancer.prototype._handleRequest = function (req, res) {
   var self = this;
-  async.applyEachSeries(this._middleware[this.MIDDLEWARE_REQUEST], req, res, function (err) {
-    if (err) {
-      self._errorDomain.emit('error', err);
-    } else {
-      self._proxyHTTP(req, res);
-    }
-  });
+  
+  var requestMiddleware = this._middleware[this.MIDDLEWARE_REQUEST];
+  if (requestMiddleware.length) {
+    async.applyEachSeries(requestMiddleware, req, res, function (err) {
+      if (err) {
+        self._errorDomain.emit('error', err);
+      } else {
+        self._proxyHTTP(req, res);
+      }
+    });
+  } else {
+    this._proxyHTTP(req, res);
+  }
 };
 
 LoadBalancer.prototype._handleUpgrade = function (req, socket, head) {
   var self = this;
-  async.applyEachSeries(this._middleware[this.MIDDLEWARE_UPGRADE], req, socket, head, function (err) {
-    if (err) {
-      self._errorDomain.emit('error', err);
-    } else {
-      self._proxyWebSocket(req, socket, head);
-    }
-  });
+  
+  var upgradeMiddleware = this._middleware[this.MIDDLEWARE_UPGRADE];
+  if (upgradeMiddleware.length) {
+    async.applyEachSeries(upgradeMiddleware, req, socket, head, function (err) {
+      if (err) {
+        self._errorDomain.emit('error', err);
+      } else {
+        self._proxyWebSocket(req, socket, head);
+      }
+    });
+  } else {
+    this._proxyWebSocket(req, socket, head);
+  }
 };
 
 LoadBalancer.prototype._proxyHTTP = function (req, res) {
-  var dest = this._parseDest(req);
-
-  if (dest) {
-    if (this.destPorts[dest.port] == null) {
-      dest.port = this._chooseTargetPort();
+  var dest;
+  if (this.useSmartBalancing) {
+    dest = this._parseSessionDest(req);
+    if (dest) {
+      if (this.destPorts[dest.port] == null) {
+        dest.port = this._chooseTargetPort();
+      }
+    } else {
+      dest = {
+        host: 'localhost',
+        port: this._chooseTargetPort()
+      };
     }
   } else {
-    dest = {
-      host: 'localhost',
-      port: this._chooseTargetPort()
-    };
+    dest = this._parseIPDest(req);
   }
-
   this._proxy.web(req, res, {
     target: dest
   });
 };
 
 LoadBalancer.prototype._proxyWebSocket = function (req, socket, head) {
-  var dest = this._parseDest(req);
-
-  if (dest) {
-    if (this.destPorts[dest.port] == null) {
-      dest.port = this._randomPort();
+  var dest;
+  if (this.useSmartBalancing) {
+    dest = this._parseSessionDest(req);
+    if (dest) {
+      if (this.destPorts[dest.port] == null) {
+        dest.port = this._randomPort();
+      }
+    } else {
+      dest = {
+        host: 'localhost',
+        port: this._chooseTargetPort()
+      };
     }
   } else {
-    dest = {
-      host: 'localhost',
-      port: this._chooseTargetPort()
-    };
+    dest = this._parseIPDest(req);
   }
-
   this._proxy.ws(req, socket, head, {
     target: dest
   });
@@ -160,8 +183,6 @@ LoadBalancer.prototype.setWorkers = function (workers) {
     this.destPorts[workers[i].port] = 1;
   }
   this.workers = workers;
-
-  setInterval(this._errorDomain.bind(this._updateStatus.bind(this)), this.statusCheckInterval);
 };
 
 LoadBalancer.prototype._randomPort = function () {
@@ -272,7 +293,49 @@ LoadBalancer.prototype._updateStatus = function () {
   }
 };
 
-LoadBalancer.prototype._parseDest = function (req) {
+LoadBalancer.prototype._hash = function (str, maxValue) {
+  var ch;
+  var hash = 0;
+  if (str.length == 0) return hash;
+  for (var i = 0; i < str.length; i++) {
+    ch = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + ch;
+    hash = hash & hash;
+  }
+  return Math.abs(hash) % maxValue;
+};
+
+LoadBalancer.prototype._parseIPDest = function (req) {
+  if (req.connection) {
+    var ipAddress;
+    var headers = req.headers || {};
+    var forwardedFor = headers['x-forwarded-for'];
+    if (forwardedFor) {
+      var forwardedClientIP;
+      // For efficiency purposes since in many cases there won't be a comma
+      if (forwardedFor.indexOf(',') > -1) {
+        forwardedClientIP = forwardedFor.split(',')[0];
+      } else {
+        forwardedClientIP = forwardedFor;
+      }
+      ipAddress = forwardedClientIP;
+    } else {
+      ipAddress = req.connection.remoteAddress;
+    }
+    
+    var workerIndex = this._hash(ipAddress, this.workers.length);
+    var destPort = this.workers[workerIndex].port;
+    
+    var dest = {
+      host: 'localhost',
+      port: destPort
+    };
+    return dest;
+  }
+  return null;
+};
+
+LoadBalancer.prototype._parseSessionDest = function (req) {
   if (!req.headers || !req.headers.host) {
     return null;
   }
