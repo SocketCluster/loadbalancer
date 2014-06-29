@@ -1,6 +1,6 @@
 {
   "name": "loadbalancer",
-  "version": "0.9.14",
+  "version": "0.9.15",
   "description": "Load balancer for SocketCluser",
   "keywords": [
     "loadbalancer",
@@ -16,7 +16,7 @@
     }
   ],
   "dependencies": {
-    "http-proxy": "1.0.3",
+    "http-proxy": "1.1.4",
     "async": "0.7.0"
   },
   "main": "index",
