@@ -18,10 +18,12 @@ var LoadBalancer = function (options) {
 
   this.MIDDLEWARE_REQUEST = 'request';
   this.MIDDLEWARE_UPGRADE = 'upgrade';
+  this.MIDDLEWARE_ERROR = 'error';
 
   this._middleware = {};
   this._middleware[this.MIDDLEWARE_REQUEST] = [];
   this._middleware[this.MIDDLEWARE_UPGRADE] = [];
+  this._middleware[this.MIDDLEWARE_ERROR] = [];
 
   this.protocol = options.protocol;
   this.protocolOptions = options.protocolOptions;
@@ -52,16 +54,8 @@ var LoadBalancer = function (options) {
     xfwd: true,
     ws: true
   });
-
-  this._proxy.on('error', function (err, req, res) {
-    if (res.writeHead) {
-      res.writeHead(500, {
-        'Content-Type': 'text/html'
-      });
-    }
-
-    res.end('Proxy error - ' + (err.message || err));
-  });
+  
+  this._proxy.on('error', this._handleError.bind(this));
 
   if (this.protocol == 'https') {
     this._server = https.createServer(this.protocolOptions, this._handleRequest.bind(this));
@@ -72,7 +66,7 @@ var LoadBalancer = function (options) {
   this._errorDomain.add(this._server);
 
   this._server.on('upgrade', this._handleUpgrade.bind(this));
-  
+
   if (this.useSmartBalancing) {
     setInterval(this._errorDomain.bind(this._updateStatus.bind(this)), this.statusCheckInterval);
   }
@@ -82,7 +76,7 @@ LoadBalancer.prototype = Object.create(EventEmitter.prototype);
 
 LoadBalancer.prototype.start = function () {
   var self = this;
-  
+
   if (this.appBalancerControllerPath) {
     this._errorDomain.run(function () {
       self.balancerController = require(self.appBalancerControllerPath);
@@ -97,9 +91,36 @@ LoadBalancer.prototype.addMiddleware = function (type, middleware) {
   this._middleware[type].push(middleware);
 };
 
+LoadBalancer.prototype._defaultErrorHandler = function (err, req, res) {
+  if (res.writeHead) {
+    res.writeHead(500, {
+      'Content-Type': 'text/html'
+    });
+  }
+
+  res.end('Load balancer error - ' + (err.message || err));
+};
+
+LoadBalancer.prototype._handleError = function (error, req, res) {
+  var self = this;
+
+  var errorMiddleware = this._middleware[this.MIDDLEWARE_ERROR];
+  if (errorMiddleware.length) {
+    async.applyEachSeries(errorMiddleware, error, req, res, function (err) {
+      if (err) {
+        self._errorDomain.emit('error', err);
+      } else {
+        self._defaultErrorHandler(error, req, res);
+      }
+    });
+  } else {
+    this._defaultErrorHandler(error, req, res);
+  }
+};
+
 LoadBalancer.prototype._handleRequest = function (req, res) {
   var self = this;
-  
+
   var requestMiddleware = this._middleware[this.MIDDLEWARE_REQUEST];
   if (requestMiddleware.length) {
     async.applyEachSeries(requestMiddleware, req, res, function (err) {
