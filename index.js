@@ -38,6 +38,7 @@ var LoadBalancer = function (options) {
   this.balancerCount = options.balancerCount || 1;
   this.appBalancerControllerPath = options.appBalancerControllerPath;
   this.useSmartBalancing = options.useSmartBalancing;
+  this.downgradeToUser = options.downgradeToUser;
   
   this._destRegex = /^([^_]*)_([^_]*)_([^_]*)_/;
   this._sidRegex = /([^A-Za-z0-9]|^)s?sid=([^;]*)/;
@@ -85,6 +86,16 @@ LoadBalancer.prototype.start = function () {
   }
 
   this._server.listen(this.sourcePort);
+  
+  if (this.downgradeToUser && process.setuid) {
+    try {
+      process.setuid(this.downgradeToUser);
+    } catch (err) {
+      this._errorDomain.emit('error', new Error('Could not downgrade to user "' + this.downgradeToUser +
+      '" - Either this user does not exist or the current process does not have the permission' +
+      ' to switch to it.'));
+    }
+  }
 };
 
 LoadBalancer.prototype.addMiddleware = function (type, middleware) {

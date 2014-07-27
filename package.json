@@ -15,6 +15,10 @@
       "name": "Jonathan Gros-Dubois"
     }
   ],
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/topcloud/loadbalancer.git"
+  },
   "dependencies": {
     "http-proxy": "1.1.4",
     "async": "0.7.0"
