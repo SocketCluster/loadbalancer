@@ -29,7 +29,6 @@ var LoadBalancer = function (options) {
   this.protocolOptions = options.protocolOptions;
 
   this.sourcePort = options.sourcePort;
-  this.host = options.host;
 
   this.dataKey = options.dataKey;
   this.statusCheckInterval = options.statusCheckInterval || 5000;
@@ -39,6 +38,7 @@ var LoadBalancer = function (options) {
   this.appBalancerControllerPath = options.appBalancerControllerPath;
   this.useSmartBalancing = options.useSmartBalancing;
   this.downgradeToUser = options.downgradeToUser;
+  this.socketDirPath = options.socketDirPath;
   
   this._destRegex = /^([^_]*)_([^_]*)_([^_]*)_/;
   this._sidRegex = /([^A-Za-z0-9]|^)s?sid=([^;]*)/;
@@ -168,13 +168,12 @@ LoadBalancer.prototype._proxyHTTP = function (req, res) {
   if (this.useSmartBalancing) {
     dest = this._parseSessionDest(req);
     if (dest) {
-      if (this.destPorts[dest.port] == null) {
-        dest.port = this._chooseTargetPort();
+      if (this.destSocketPaths[dest.socketPath] == null) {
+        dest.socketPath = this._chooseTargetSocketPath();
       }
     } else {
       dest = {
-        host: 'localhost',
-        port: this._chooseTargetPort()
+        socketPath: this._chooseTargetSocketPath()
       };
     }
   } else {
@@ -190,13 +189,12 @@ LoadBalancer.prototype._proxyWebSocket = function (req, socket, head) {
   if (this.useSmartBalancing) {
     dest = this._parseSessionDest(req);
     if (dest) {
-      if (this.destPorts[dest.port] == null) {
-        dest.port = this._randomPort();
+      if (this.destSocketPaths[dest.socketPath] == null) {
+        dest.socketPath = this._randomSocketPath();
       }
     } else {
       dest = {
-        host: 'localhost',
-        port: this._chooseTargetPort()
+        socketPath: this._chooseTargetSocketPath()
       };
     }
   } else {
@@ -208,30 +206,28 @@ LoadBalancer.prototype._proxyWebSocket = function (req, socket, head) {
 };
 
 LoadBalancer.prototype.setWorkers = function (workers) {
-  this.destPorts = {};
-  var i;
-
-  for (i in workers) {
-    this.destPorts[workers[i].port] = 1;
+  this.destSocketPaths = {};
+  for (var i in workers) {
+    this.destSocketPaths[this.socketDirPath + workers[i]] = 1;
   }
   this.workers = workers;
 };
 
-LoadBalancer.prototype._randomPort = function () {
+LoadBalancer.prototype._randomSocketPath = function () {
   var rand = Math.floor(Math.random() * this.workers.length);
-  return this.workers[rand].port;
+  return this.socketDirPath + this.workers[rand];
 };
 
-LoadBalancer.prototype._chooseTargetPort = function () {
+LoadBalancer.prototype._chooseTargetSocketPath = function () {
   if (this.workerQuotas.length) {
     var leastBusyWorker = this.workerQuotas[this.workerQuotas.length - 1];
     leastBusyWorker.quota--;
     if (leastBusyWorker.quota < 1) {
       this.workerQuotas.pop();
     }
-    return leastBusyWorker.port;
+    return leastBusyWorker.socketPath;
   }
-  return this._randomPort();
+  return this._randomSocketPath();
 };
 
 LoadBalancer.prototype._calculateWorkerQuotas = function () {
@@ -239,11 +235,10 @@ LoadBalancer.prototype._calculateWorkerQuotas = function () {
   var maxClients = 0;
   var workerClients = {};
   this.workerQuotas = [];
-
+  
   for (var i in this.workerStatuses) {
     if (this.workerStatuses[i]) {
       clientCount = this.workerStatuses[i].clientCount;
-
       if (clientCount > maxClients) {
         maxClients = clientCount;
       }
@@ -257,7 +252,7 @@ LoadBalancer.prototype._calculateWorkerQuotas = function () {
     var targetQuota = Math.round((maxClients - workerClients[j]) / this.balancerCount);
     if (targetQuota > 0) {
       this.workerQuotas.push({
-        port: j,
+        socketPath: j,
         quota: targetQuota
       });
     }
@@ -278,10 +273,11 @@ LoadBalancer.prototype._updateStatus = function () {
   };
 
   for (var i in this.workers) {
-    (function (worker) {
+    (function (workerSocketName) {
+      var workerSocketPath = self.socketDirPath + workerSocketName;
+      
       var options = {
-        hostname: 'localhost',
-        port: worker.port,
+        socketPath: workerSocketPath,
         method: 'POST',
         path: self.statusURL
       };
@@ -298,12 +294,12 @@ LoadBalancer.prototype._updateStatus = function () {
           var result = Buffer.concat(buffers).toString();
           if (result) {
             try {
-              self.workerStatuses[worker.port] = JSON.parse(result);
+              self.workerStatuses[workerSocketPath] = JSON.parse(result);
             } catch (err) {
-              self.workerStatuses[worker.port] = null;
+              self.workerStatuses[workerSocketPath] = null;
             }
           } else {
-            self.workerStatuses[worker.port] = null;
+            self.workerStatuses[workerSocketPath] = null;
           }
 
           if (++statusesRead >= workerCount) {
@@ -356,11 +352,9 @@ LoadBalancer.prototype._parseIPDest = function (req) {
     }
     
     var workerIndex = this._hash(ipAddress, this.workers.length);
-    var destPort = this.workers[workerIndex].port;
     
     var dest = {
-      host: 'localhost',
-      port: destPort
+      socketPath: this.socketDirPath + this.workers[workerIndex]
     };
     return dest;
   }
@@ -397,15 +391,14 @@ LoadBalancer.prototype._parseSessionDest = function (req) {
     return null;
   }
 
-  var destPort = parseInt(destMatch[2]);
-
-  if (!destPort) {
+  var destSocketName = destMatch[1];
+  
+  if (!destSocketName) {
     return null;
   }
 
   var dest = {
-    host: 'localhost',
-    port: destPort
+    socketPath: this.socketDirPath + destSocketName
   };
 
   return dest;
