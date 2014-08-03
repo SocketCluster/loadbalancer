@@ -40,7 +40,7 @@ var LoadBalancer = function (options) {
   this.downgradeToUser = options.downgradeToUser;
   this.socketDirPath = options.socketDirPath;
   
-  this._destRegex = /^([^_]*)_([^_]*)_([^_]*)_/;
+  this._destRegex = /^([^_]*)_([^_]*)_([^_]*)_([^_]*)_/;
   this._sidRegex = /([^A-Za-z0-9]|^)s?sid=([^;]*)/;
 
   this.setWorkers(options.workers);
@@ -391,8 +391,7 @@ LoadBalancer.prototype._parseSessionDest = function (req) {
     return null;
   }
 
-  var destSocketName = destMatch[1];
-  
+  var destSocketName = destMatch[2];
   if (!destSocketName) {
     return null;
   }
