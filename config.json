@@ -1,0 +1,15 @@
+{
+  "sourcePort": 80,
+  "balancerCount": 1,
+  "balancerControllerPath": null,
+  "targets": [
+    {
+      "host": "localhost",
+      "port": 8000
+    },
+    {
+      "host": "localhost",
+      "port": 8100
+    }
+  ]
+}
