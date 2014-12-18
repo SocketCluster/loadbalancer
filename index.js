@@ -2,12 +2,15 @@ var LoadBalancer = require('./loadbalancer');
 var cluster = require('cluster');
 var fs = require('fs');
 var argv = require('minimist')(process.argv.slice(2));
+var path = require('path');
 var os = require('os');
 
 var CLOSE_TIMEOUT = 10000;
 
 if (cluster.isMaster) {
-  var config = fs.readFileSync(argv.config || 'config.json', {encoding: 'utf8'});
+  var defaultConfigFile = path.resolve('config.json');
+  var config = fs.readFileSync(argv.config || defaultConfigFile, {encoding: 'utf8'});
+
   var options = JSON.parse(config);
 
   if (options.balancerCount == null) {
