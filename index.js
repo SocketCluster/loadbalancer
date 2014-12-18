@@ -8,11 +8,13 @@ var os = require('os');
 var CLOSE_TIMEOUT = 10000;
 
 if (cluster.isMaster) {
-  var defaultConfigFile = path.resolve('config.json');
-  var config = fs.readFileSync(argv.config || defaultConfigFile, {encoding: 'utf8'});
+  var configFilePath = argv.config || path.resolve('config.json');
+  var config = fs.readFileSync(configFilePath, {encoding: 'utf8'});
 
   var options = JSON.parse(config);
 
+  options.configDir = path.dirname(configFilePath);
+  options.balancerControllerPath = path.resolve(options.configDir, options.balancerControllerPath);
   if (options.balancerCount == null) {
     options.balancerCount = os.cpus().length;
   }

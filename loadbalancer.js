@@ -1,5 +1,6 @@
 var net = require('net');
 var domain = require('domain');
+var async = require('async');
 var ExpiryManager = require('expirymanager').ExpiryManager;
 var EventEmitter = require('events').EventEmitter;
 
@@ -13,7 +14,10 @@ var LoadBalancer = function (options) {
     }
   });
 
+  this.MIDDLEWARE_CONNECTION = 'connection';
+  
   this._middleware = {};
+  this._middleware[this.MIDDLEWARE_CONNECTION] = [];
 
   this.sourcePort = options.sourcePort;
 
@@ -36,6 +40,10 @@ var LoadBalancer = function (options) {
 };
 
 LoadBalancer.prototype = Object.create(EventEmitter.prototype);
+
+LoadBalancer.prototype.addMiddleware = function (type, middleware) {
+  this._middleware[type].push(middleware);
+};
 
 LoadBalancer.prototype._start = function () {
   var self = this;
@@ -152,7 +160,40 @@ LoadBalancer.prototype._connectToTarget = function (sourceSocket, callback) {
   targetSocket.on('connect', connectionSucceeded);
 };
 
+LoadBalancer.prototype._verifyConnection = function (sourceSocket, callback) {
+  var self = this;
+  
+  async.applyEachSeries(this._middleware[this.MIDDLEWARE_CONNECTION], sourceSocket,
+    function (err) {
+      if (err) {
+        self.emit('notice', err);
+      }
+      callback(err, sourceSocket);
+    }
+  )
+};
+
 LoadBalancer.prototype._handleConnection = function (sourceSocket) {
+  var self = this;
+  
+  sourceSocket.on('error', function (err) {
+    self._errorDomain.emit('error', err);
+  });
+  
+  this._verifyConnection(sourceSocket, function (err) {
+    if (err) {
+      self._rejectConnection(sourceSocket, err);
+    } else {
+      self._acceptConnection(sourceSocket);
+    }
+  });
+};
+
+LoadBalancer.prototype._rejectConnection = function (sourceSocket) {
+  sourceSocket.end();
+};
+
+LoadBalancer.prototype._acceptConnection = function (sourceSocket) {
   var self = this;
   
   var remoteAddress = sourceSocket.remoteAddress;
@@ -219,10 +260,6 @@ LoadBalancer.prototype._handleConnection = function (sourceSocket) {
       sourceSocket.pipe(targetSocket);
       targetSocket.pipe(sourceSocket);
     }
-  });
-  
-  sourceSocket.on('error', function (err) {
-    self._errorDomain.emit('error', err);
   });
 };
 
