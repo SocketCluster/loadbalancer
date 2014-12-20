@@ -9,12 +9,17 @@ var CLOSE_TIMEOUT = 10000;
 
 if (cluster.isMaster) {
   var configFilePath = argv.config || path.resolve('config.json');
+  if (!fs.existsSync(configFilePath)) {
+    throw new Error('Could not find a config file at path: ' + configFilePath);
+  }
   var config = fs.readFileSync(configFilePath, {encoding: 'utf8'});
 
   var options = JSON.parse(config);
 
   options.configDir = path.dirname(configFilePath);
-  options.balancerControllerPath = path.resolve(options.configDir, options.balancerControllerPath);
+  if (options.balancerControllerPath) {
+    options.balancerControllerPath = path.resolve(options.configDir, options.balancerControllerPath);
+  }
   if (options.balancerCount == null) {
     options.balancerCount = os.cpus().length;
   }
@@ -63,7 +68,7 @@ if (cluster.isMaster) {
       balancer = new LoadBalancer(m.data);
 
       balancer.on('error', function (err) {
-        console.log('ERROR', err.stack || err.message);
+        console.log(err.stack || err.message);
       });
     } else if (m.type == 'destroy') {
       if (balancer) {

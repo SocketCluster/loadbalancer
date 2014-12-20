@@ -77,24 +77,44 @@ LoadBalancer.prototype.close = function (callback) {
 LoadBalancer.prototype.setTargets = function (targets) {
   this.targets = targets;
   this.activeTargets = targets;
+  this.activeTargetsLookup = {};
+  
+  var target;
+  for (var i = 0; i < targets.length; i++) {
+    target = targets[i];
+    this.activeTargetsLookup[target.host + ':' + target.port] = 1;
+  }
 };
 
 LoadBalancer.prototype.deactivateTarget = function (host, port) {
   var self = this;
   
-  var target = {
-    host: host,
-    port: port
-  };
+  var hostAndPort = host + ':' + port;
   
-  this.activeTargets = this.activeTargets.filter(function (currentTarget) {
-    return currentTarget.host != host || currentTarget.port != port;
-  });
-  
-  // Reactivate after a while
-  setTimeout(function () {
-    self.activeTargets.push(target);
-  }, this.targetDeactivationDuration);
+  if (this.activeTargetsLookup[hostAndPort]) {
+    var target = {
+      host: host,
+      port: port
+    };
+    
+    this.activeTargets = this.activeTargets.filter(function (currentTarget) {
+      return currentTarget.host != host || currentTarget.port != port;
+    });
+    
+    delete this.activeTargetsLookup[hostAndPort];
+    
+    // Reactivate after a while
+    setTimeout(function () {
+      if (!self.activeTargetsLookup[hostAndPort]) {
+        self.activeTargets.push(target);
+        self.activeTargetsLookup[hostAndPort] = 1;
+      }
+    }, this.targetDeactivationDuration);
+  }
+};
+
+LoadBalancer.prototype.isTargetActive = function (host, port) {
+  return !!this.activeTargetsLookup[host + ':' + port];
 };
 
 LoadBalancer.prototype._hash = function (str, maxValue) {
@@ -112,37 +132,56 @@ LoadBalancer.prototype._hash = function (str, maxValue) {
 };
 
 LoadBalancer.prototype._chooseTarget = function (sourceSocket) {
-  var remoteAddress = sourceSocket.remoteAddress;
-  var activeSession = this._activeSessions[remoteAddress];
-  
-  if (activeSession) {
-    return activeSession.targetUri;
-  }
-  
-  var targetIndex = this._hash(remoteAddress, this.activeTargets.length);
+  var targetIndex = this._hash(sourceSocket.remoteAddress, this.activeTargets.length);
   return this.activeTargets[targetIndex];
 };
 
-LoadBalancer.prototype._connectToTarget = function (sourceSocket, callback) {
+LoadBalancer.prototype._connectToTarget = function (sourceSocket, callback, newTargetUri) {
   var self = this;
   
-  var targetUri = this._chooseTarget(sourceSocket);
+  var remoteAddress = sourceSocket.remoteAddress;
+  var activeSession = this._activeSessions[remoteAddress];
+
+  if (newTargetUri !== undefined) {
+    activeSession.targetUri = newTargetUri;
+  }
   
-  if (targetUri == null) {
+  // If null, it means that we ran out of targets
+  if (activeSession.targetUri == null) {
     callback(new Error('There are no available targets'));
     return;
   }
   
-  var targetSocket = net.createConnection(targetUri.port, targetUri.host);
+  var currentTargetUri = activeSession.targetUri;
+  var targetSocket = net.createConnection(currentTargetUri.port, currentTargetUri.host);
   
   function connectionFailed (err) {
     if (err.code == 'ECONNREFUSED') {
-      self.deactivateTarget(targetUri.host, targetUri.port);
+      self.deactivateTarget(currentTargetUri.host, currentTargetUri.port);
       targetSocket.removeListener('error', connectionFailed);
       targetSocket.removeListener('connect', connectionSucceeded);
       
       process.nextTick(function () {
-        self._connectToTarget(sourceSocket, callback);
+        var latestActiveSession = self._activeSessions[remoteAddress];
+        var nextTargetUri;
+        
+        // If there is still an active session for the current sourceSocket,
+        // try to connect to a different target
+        if (latestActiveSession) {
+          var lastChosenTargetUri = latestActiveSession.targetUri;
+          
+          // We need to account for asynchronous cases whereby another connection from the
+          // same session (same IP address) may have already chosen a new target for the 
+          // session - We need both of these connections to settle on the same target
+          if (lastChosenTargetUri.host == currentTargetUri.host && 
+            lastChosenTargetUri.port == currentTargetUri.port) {
+            
+            nextTargetUri = self._chooseTarget(sourceSocket);
+          } else {
+            nextTargetUri = lastChosenTargetUri;
+          }
+          self._connectToTarget(sourceSocket, callback, nextTargetUri || null);
+        }
       });
     } else {
       var errorMessage = err.stack || err.message;
@@ -153,7 +192,7 @@ LoadBalancer.prototype._connectToTarget = function (sourceSocket, callback) {
   function connectionSucceeded() {
     targetSocket.removeListener('error', connectionFailed);
     targetSocket.removeListener('connect', connectionSucceeded);
-    callback(null, targetSocket, targetUri);
+    callback(null, targetSocket, currentTargetUri);
   }
   
   targetSocket.on('error', connectionFailed);
@@ -176,10 +215,45 @@ LoadBalancer.prototype._verifyConnection = function (sourceSocket, callback) {
 LoadBalancer.prototype._handleConnection = function (sourceSocket) {
   var self = this;
   
+  var remoteAddress = sourceSocket.remoteAddress;
+  
   sourceSocket.on('error', function (err) {
     self._errorDomain.emit('error', err);
   });
   
+   if (this._activeSessions[remoteAddress]) {
+    this._activeSessions[remoteAddress].clientCount++;
+  } else {
+    this._activeSessions[remoteAddress] = {
+      targetUri: this._chooseTarget(sourceSocket),
+      clientCount: 1
+    };
+  }
+  this._sessionExpirer.unexpire([remoteAddress]);
+  
+  sourceSocket.once('close', function () {
+    var freshActiveSession = self._activeSessions[remoteAddress];
+    
+    if (freshActiveSession) {
+      freshActiveSession.clientCount--;
+      var freshTargetUri = freshActiveSession.targetUri;
+      
+      // If freshTargetUri is null, then it means that the LoadBalancer could not
+      // establish a connection to any target
+      if (freshTargetUri) {
+        if (freshActiveSession.clientCount < 1) {
+          if (self.isTargetActive(freshTargetUri.host, freshTargetUri.port)) {
+            self._sessionExpirer.expire([remoteAddress], Math.round(self.sessionExpiry / 1000));
+          } else {
+            delete self._activeSessions[remoteAddress];
+          }
+        }
+      } else {
+        delete self._activeSessions[remoteAddress];
+      }
+    }
+  });
+
   this._verifyConnection(sourceSocket, function (err) {
     if (err) {
       self._rejectConnection(sourceSocket, err);
@@ -216,21 +290,14 @@ LoadBalancer.prototype._acceptConnection = function (sourceSocket) {
   
   self._connectToTarget(sourceSocket, function (err, targetSocket, targetUri) {
     if (err) {
+      sourceSocket.end();
       self._errorDomain.emit('error', err);
     } else {
-      if (self._activeSessions[remoteAddress]) {
-        self._activeSessions[remoteAddress].clientCount++;
-      } else {
-        self._activeSessions[remoteAddress] = {
-          targetUri: targetUri,
-          clientCount: 1
-        };
-        self._sessionExpirer.unexpire([remoteAddress]);
-      }
-      
+    
       sourceSocket.removeListener('data', bufferSourceData);
       
       targetSocket.on('error', function (err) {
+        self.deactivateTarget(targetUri.host, targetUri.port);
         sourceSocket.unpipe(targetSocket);
         targetSocket.unpipe(sourceSocket);
         self._errorDomain.emit('error', err);
@@ -243,11 +310,6 @@ LoadBalancer.prototype._acceptConnection = function (sourceSocket) {
         targetSocket.end();
       });
       targetSocket.once('close', function () {
-        var activeSession = self._activeSessions[remoteAddress];
-        activeSession.clientCount--;
-        if (activeSession.clientCount < 1) {
-          self._sessionExpirer.expire([remoteAddress], self.sessionExpiry);
-        }
         sourceSocket.end();
       });
       
