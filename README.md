@@ -94,8 +94,8 @@ loadbalancer stop
 ## Middleware
 
 LoadBalancer.js does balancing at the TCP layer - This is great for performance and also means that it can work with HTTPS without having to supply it with a certificate.
-The downside is that target servers will not be able to see the clients' IP addresses (on a target server; req.connection.remoteAddress will in fact be the LoadBalancer's IP address and not the client's) 
-- This means that if you want to do things like block a client based on their IP address, you will have to do it at the load balancer level.
+The downside is that target servers will not be able to see the clients' IP addresses (on a target server; req.connection.remoteAddress will in fact be the 
+LoadBalancer's IP address and not the client's) - This means that if you want to do things like block a client based on their IP address, you will have to do it at the load balancer level.
 For this purpose, LoadBalancer.js lets you specify a balancerController script which allows you to define middleware which you can use to block incoming 
 connections before they are handled by LoadBalancer.js.
 
