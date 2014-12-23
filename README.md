@@ -71,7 +71,7 @@ Here is a sample config file showing all available options:
 }
 ```
 
-### Options
+#### Options
 
 **sourcePort** - The port that this load balancer will listen on.
 **balancerCount** - [Optional - Defaults to available number of CPU cores] The number of load balancer processes to spawn.
@@ -81,12 +81,12 @@ Here is a sample config file showing all available options:
 
 ## How to run
 
-### Start
+#### Start
 ```bash
 loadbalancer start --config my/path/config.json
 ```
 
-### Stop
+#### Stop
 ```bash
 loadbalancer stop
 ```
