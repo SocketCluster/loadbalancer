@@ -23,7 +23,7 @@ var LoadBalancer = function (options) {
 
   this.balancerControllerPath = options.balancerControllerPath;
   this.downgradeToUser = options.downgradeToUser;
-  this.targetDeactivationDuration = options.targetDeactivationDuration || 120000;
+  this.targetDeactivationDuration = options.targetDeactivationDuration || 60000;
   this.sessionExpiry = options.sessionExpiry || 30000;
   this.sessionExpiryInterval = options.sessionExpiryInterval || 1000;
   this.maxBufferSize = options.maxBufferSize || 8192;
