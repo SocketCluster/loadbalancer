@@ -1,15 +1,12 @@
 {
   "sourcePort": 80,
   "balancerCount": 1,
-  "balancerControllerPath": null,
+  "targetDeactivationDuration": 30000,
+  "balancerControllerPath": "../balancer.js",
   "targets": [
     {
       "host": "localhost",
       "port": 8000
-    },
-    {
-      "host": "localhost",
-      "port": 8100
     }
   ]
 }
