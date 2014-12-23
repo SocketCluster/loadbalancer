@@ -28,6 +28,9 @@
   "devDependencies": {
     "mocha": "1.20.x"
   },
+  "bin": {
+    "loadbalancer": "bin/cli.js"
+  },
   "main": "index",
   "engines": {
     "node": ">= 0.8.0"
