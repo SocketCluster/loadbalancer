@@ -8,7 +8,7 @@ It chooses the appropriate target based on a hash of the client's IP address.
 LoadBalancer.js was originally designed to work with SocketCluster (http://socketcluster.io) but it can work equally well with any other realtime framework.
 
 Once a client establishes its first successful connection/request with a target, all subsequent 
-connections/requests from that client will stick to that same target unless that target crashes or goes offline.
+connections/requests from that client will stick to that same target unless that target crashes or goes offline (or the session times out).
 
 LoadBalancer.js handles target failures transparently. New connections can never fail so long as there is at least one active target -
 LoadBalancer.js will automatically rollback connections to bad targets behind the scenes without the client noticing.
@@ -57,6 +57,8 @@ Here is a sample config file showing all available options:
   "sourcePort": 80,
   "balancerCount": 1,
   "targetDeactivationDuration": 60000,
+  "sessionExpiry": 30000,
+  "downgradeToUser": "someuser", 
   "balancerControllerPath": "../balancer.js",
   "targets": [
     {
@@ -76,6 +78,8 @@ Here is a sample config file showing all available options:
 **sourcePort** - The port that this load balancer will listen on.
 **balancerCount** - [Optional - Defaults to available number of CPU cores] The number of load balancer processes to spawn.
 **targetDeactivationDuration** - [Optional - Defaults to 60000] How long (in milliseconds) a target will be considered to be inactive after it fails to handle a connection before LoadBalancer will try again.
+**sessionExpiry** - [Optional - Defaults to 30000] How long (in milliseconds) after a client severed all connections to target before expiring the session.
+**downgradeToUser** - [Optional - Defaults to null] If you're launching LoadBalancer.js as root, you may wish to downgrade the permissions after launch for security purposes - This can be a Linux username or UID.
 **balancerControllerPath** - [Optional - Defaults to null] The path to your balancerController script which you can use to block incoming connections before they are processed by LoadBalancer.js.
 **targets** - An array of target servers to forward connections to (LoadBalancer.js will spread the load between them).
 
