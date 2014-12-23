@@ -32,7 +32,25 @@ npm install -g loadbalancer
 ## Config
 
 To run LoadBalancer.js, you just need to provide it with a config file (use --config some/path/config.json command line argument).
-Here is a sample config file showing all possible options:
+Here is a sample config file showing the most basic options necessary:
+
+```json
+{
+  "sourcePort": 80,
+  "targets": [
+    {
+      "host": "localhost",
+      "port": 8000
+    },
+    {
+      "host": "localhost",
+      "port": 8001
+    }
+  ]
+}
+```
+
+Here is a sample config file showing all available options:
 
 ```json
 {
@@ -56,9 +74,9 @@ Here is a sample config file showing all possible options:
 ### Options
 
 **sourcePort** - The port that this load balancer will listen on.
-**balancerCount** - The number of load balancer processes to spawn - Set this to the number of CPU cores on your machine to make use of all cores!
-**targetDeactivationDuration** - How long a target will be considered to be inactive after it fails to handle a connection before LoadBalancer will try again.
-**balancerControllerPath** - The path to your balancerController script which you can use to block incoming connections before they are processed by LoadBalancer.js.
+**balancerCount** - [Optional - Defaults to available number of CPU cores] The number of load balancer processes to spawn.
+**targetDeactivationDuration** - [Optional - Defaults to 60000] How long (in milliseconds) a target will be considered to be inactive after it fails to handle a connection before LoadBalancer will try again.
+**balancerControllerPath** - [Optional - Defaults to null] The path to your balancerController script which you can use to block incoming connections before they are processed by LoadBalancer.js.
 **targets** - An array of target servers to forward connections to (LoadBalancer.js will spread the load between them).
 
 ## How to run
