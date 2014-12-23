@@ -1,6 +1,6 @@
 {
   "name": "loadbalancer",
-  "version": "0.9.19",
+  "version": "0.9.20",
   "description": "Load balancer for SocketCluser",
   "keywords": [
     "loadbalancer",
