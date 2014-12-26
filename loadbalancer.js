@@ -132,8 +132,14 @@ LoadBalancer.prototype._hash = function (str, maxValue) {
 };
 
 LoadBalancer.prototype._chooseTarget = function (sourceSocket) {
-  var targetIndex = this._hash(sourceSocket.remoteAddress, this.activeTargets.length);
-  return this.activeTargets[targetIndex];
+  var primaryTargetIndex = this._hash(sourceSocket.remoteAddress, this.targets.length);
+  var primaryTarget = this.targets[primaryTargetIndex];
+  if (this.activeTargetsLookup[primaryTarget.host + ':' + primaryTarget.port]) {
+    return primaryTarget;
+  }
+  // If the primary target isn't active, we need to choose a secondary one
+  var secondaryTargetIndex = this._hash(sourceSocket.remoteAddress, this.activeTargets.length);
+  return this.activeTargets[secondaryTargetIndex];
 };
 
 LoadBalancer.prototype._connectToTarget = function (sourceSocket, callback, newTargetUri) {
