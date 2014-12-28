@@ -13,8 +13,9 @@ if (cluster.isMaster) {
     throw new Error('Could not find a config file at path: ' + configFilePath);
   }
   var config = fs.readFileSync(configFilePath, {encoding: 'utf8'});
-
   var options = JSON.parse(config);
+  
+  cluster.schedulingPolicy = options.schedulingPolicy || cluster.SCHED_NONE;
 
   options.configDir = path.dirname(configFilePath);
   if (options.balancerControllerPath) {
