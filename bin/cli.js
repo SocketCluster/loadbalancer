@@ -155,6 +155,7 @@ var startBalancer = function () {
     args: commandRawArgs
   });
   forever.startServer(child);
+  successMessage('Started loadbalancer - Logging to ' + logFileName);
 };
 
 if (command == 'start') {
@@ -174,6 +175,7 @@ if (command == 'start') {
     if (err) {
       errorMessage(err);
     } else {
+      successMessage('Stopped loadbalancer');
       startBalancer();
     }
     process.exit();
@@ -183,6 +185,8 @@ if (command == 'start') {
   killExistingBalancers(function (err) {
     if (err) {
       errorMessage(err);
+    } else {
+      successMessage('Stopped loadbalancer');
     }
     process.exit();
   });
