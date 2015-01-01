@@ -124,3 +124,6 @@ module.exports.run = function (balancer) {
 };
 ```
 
+## License
+
+MIT
