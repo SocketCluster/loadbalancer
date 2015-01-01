@@ -85,6 +85,9 @@ Here is a sample config file showing all available options:
 
 ## How to run
 
+On Linux, make sure you have root privileges (sudo) - This is necessary if you want to bind to port 80.
+You may want to use the downgradeToUser option to downgrade to a different user after launch for extra security.
+
 #### Start
 ```bash
 loadbalancer start --config my/path/config.json
