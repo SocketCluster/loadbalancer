@@ -162,8 +162,6 @@ if (command == 'start') {
   getBalancerIndices(function (err, balancers) {
     if (err) {
       errorMessage(err);
-    } else if (balancers.length) {
-      errorMessage('loadbalancer daemon is already running');
     } else {
       startBalancer();
     }
