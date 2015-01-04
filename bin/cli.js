@@ -12,6 +12,9 @@ var fork = childProcess.fork;
 var fs = require('fs');
 var path = require('path');
 var forever = require('forever');
+var os = require('os');
+
+var isWindows = os.platform() == 'win32';
 
 var balancerFilePath = path.resolve(__dirname, '../index.js');
 var logFileName = path.resolve(process.cwd(), 'loadbalancer.out');
@@ -61,9 +64,9 @@ var showCorrectUsage = function () {
   console.log('  --config      The path to the config file to use');
   console.log();
   console.log('Commands:');
-  console.log('  start    Launch the load balancer');
-  console.log('  restart  Restart the load balancer');
-  console.log('  stop     Stop the load balancer');
+  console.log('  start         Launch a load balancer');
+  console.log('  list          Show a list of all active load balancers');
+  console.log('  stop [index]  Stop a load balancer - Will stop all active balancers if index is not specified');
 }
 
 var prompt = function (message, callback) {
@@ -110,10 +113,61 @@ var getBalancerIndices = function (callback) {
   });
 };
 
+var killBalancer = function (index, callback) {
+  forever.list(false, function (err, children) {
+    if (err) {
+      callback && callback('Failed to stop loadbalancer daemon at index ' + index + ' - ' + err);
+    } else {
+      var proc;
+      if (children) {
+        proc = children[index];
+      }
+      if (proc) {
+        var pid = proc.pid;
+        
+        forever.stop(index);
+        
+        var maxShutDownFailures = 20;
+        var shutDownFailures = 0;
+        var shutDownInterval = 500;
+        
+        var exitWhenComplete = function () {
+          forever.list(false, function (err, children) {
+            if (err) {
+              callback && callback('Failed to stop loadbalancer daemon at index ' + index + ' - ' + err);
+            } else if (++shutDownFailures > maxShutDownFailures) {
+              callback && callback('Failed to stop loadbalancer daemon');
+            } else {
+              var pidIsStillActive = false;
+              if (children) {
+                for (var i = 0; i < children.length; i++) {
+                  if (children[i].pid == pid) {
+                    pidIsStillActive = true;
+                    break;
+                  }
+                }
+              }
+              if (pidIsStillActive) {
+                setTimeout(exitWhenComplete, shutDownInterval);
+              } else {
+                callback && callback();
+              }
+            }
+          });
+        }
+        
+        setTimeout(exitWhenComplete, shutDownInterval);
+      } else {
+        callback && callback('There was no loadbalancer daemon at index ' + index);
+      }
+    }
+  });
+};
+
 var killExistingBalancers = function (callback) {
   getBalancerIndices(function (err, balancers) {
     if (err) {
-      callback && callback('Failed to stop loadbalancer daemon - ' + err);
+      callback && callback('Failed to stop loadbalancer daemons - ' + err);
     } else {
       for (var i = 0; i < balancers.length; i++) {
         forever.stop(balancers[i]);
@@ -163,32 +217,51 @@ if (command == 'start') {
     if (err) {
       errorMessage(err);
     } else {
-      startBalancer();
+      // Windows behaviour is unstable when spawning multiple load balancer 
+      // processes so do not allow it.
+      if (isWindows) {
+        if (balancers.length) {
+          errorMessage('loadbalancer daemon is already running');
+        } else {
+          startBalancer();
+        }
+      } else {
+        startBalancer();
+      }
     }
     process.exit();
   });
   
-} else if (command == 'restart') {
-  killExistingBalancers(function (err) {
-    if (err) {
-      errorMessage(err);
-    } else {
-      successMessage('Stopped loadbalancer');
-      startBalancer();
+} else if (command == 'list') {
+  forever.list(false, function (err, processes) {
+    if (processes) {
+      for (var i = 0; i < processes.length; i++) {
+        console.log('Index: ' + i + ', PID: ' + processes[i].pid);
+      }
     }
     process.exit();
   });
-  
 } else if (command == 'stop') {
-  killExistingBalancers(function (err) {
-    if (err) {
-      errorMessage(err);
-    } else {
-      successMessage('Stopped loadbalancer');
-    }
-    process.exit();
-  });
-  
+  var loadBalancerIndex = commandRawArgs[0];
+  if (loadBalancerIndex != null) {
+    killBalancer(loadBalancerIndex, function (err) {
+      if (err) {
+        errorMessage(err);
+      } else {
+        successMessage('Stopped loadbalancer at index ' + loadBalancerIndex);
+      }
+      process.exit();
+    });
+  } else {
+    killExistingBalancers(function (err) {
+      if (err) {
+        errorMessage(err);
+      } else {
+        successMessage('Stopped loadbalancers');
+      }
+      process.exit();
+    });
+  }
 } else {
   errorMessage("'" + command + "' is not a valid loadbalancer command");
   showCorrectUsage();
