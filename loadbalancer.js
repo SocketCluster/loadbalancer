@@ -27,6 +27,7 @@ var LoadBalancer = function (options) {
   this.sessionExpiry = options.sessionExpiry || 30000;
   this.sessionExpiryInterval = options.sessionExpiryInterval || 1000;
   this.maxBufferSize = options.maxBufferSize || 8192;
+  this.stickiness = !!options.stickiness;
 
   this.setTargets(options.targets);
 
@@ -131,14 +132,25 @@ LoadBalancer.prototype._hash = function (str, maxValue) {
   return Math.abs(hash) % maxValue;
 };
 
+LoadBalancer.prototype._random = function (str, maxValue) {
+  return Math.floor(Math.random() * maxValue);
+};
+
 LoadBalancer.prototype._chooseTarget = function (sourceSocket) {
-  var primaryTargetIndex = this._hash(sourceSocket.remoteAddress, this.targets.length);
+  var selectorFunction;
+  if (this.stickiness) {
+    selectorFunction = this._hash;
+  } else {
+    selectorFunction = this._random;
+  }
+
+  var primaryTargetIndex = selectorFunction.call(this, sourceSocket.remoteAddress, this.targets.length);
   var primaryTarget = this.targets[primaryTargetIndex];
   if (this.activeTargetsLookup[primaryTarget.host + ':' + primaryTarget.port]) {
     return primaryTarget;
   }
   // If the primary target isn't active, we need to choose a secondary one
-  var secondaryTargetIndex = this._hash(sourceSocket.remoteAddress, this.activeTargets.length);
+  var secondaryTargetIndex = selectorFunction.call(this, sourceSocket.remoteAddress, this.activeTargets.length);
   return this.activeTargets[secondaryTargetIndex];
 };
 
@@ -220,7 +232,6 @@ LoadBalancer.prototype._verifyConnection = function (sourceSocket, callback) {
 
 LoadBalancer.prototype._handleConnection = function (sourceSocket) {
   var self = this;
-  
   var remoteAddress = sourceSocket.remoteAddress;
   
   sourceSocket.on('error', function (err) {
@@ -229,6 +240,9 @@ LoadBalancer.prototype._handleConnection = function (sourceSocket) {
   
    if (this._activeSessions[remoteAddress]) {
     this._activeSessions[remoteAddress].clientCount++;
+    if (!this.stickiness) {
+      this._activeSessions[remoteAddress].targetUri = this._chooseTarget(sourceSocket);
+    }
   } else {
     this._activeSessions[remoteAddress] = {
       targetUri: this._chooseTarget(sourceSocket),

@@ -3,6 +3,7 @@
   "balancerCount": 1,
   "targetDeactivationDuration": 30000,
   "balancerControllerPath": "../balancer.js",
+  "stickiness": true,
   "targets": [
     {
       "host": "localhost",
