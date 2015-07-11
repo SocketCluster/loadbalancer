@@ -1,6 +1,8 @@
 LoadBalancer.js
 ============
 
+[![Join the chat at https://gitter.im/SocketCluster/loadbalancer](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/SocketCluster/loadbalancer?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
+
 LoadBalancer.js is a sticky-session TCP load balancer which is optimized to work with realtime frameworks (with support for HTTP long polling fallbacks).
 It captures raw TCP connections from a specified port and forwards them to various targets (defined as host and port combinations).
 It chooses the appropriate target based on a hash of the client's IP address.
